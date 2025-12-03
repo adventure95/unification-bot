@@ -12,21 +12,39 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-# === CONFIG ===
+# === CONFIGURATION ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_LOG_CHAT_ID = int(os.getenv("ADMIN_LOG_CHAT_ID"))
-OWNER_USER_ID = int(os.getenv("OWNER_USER_ID"))  # Your Telegram user ID
+ADMIN_LOG_CHAT_ID = os.getenv("ADMIN_LOG_CHAT_ID")
+OWNER_USER_ID = os.getenv("OWNER_USER_ID")
 
-if not BOT_MODE:
-    logging.basicConfig(
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        level=logging.INFO
-    )
+# Validate critical environment variables
+if not BOT_TOKEN:
+    raise ValueError("❌ Missing BOT_TOKEN in environment variables!")
+if not ADMIN_LOG_CHAT_ID:
+    raise ValueError("❌ Missing ADMIN_LOG_CHAT_ID in environment variables!")
+
+# Convert chat IDs to integers
+try:
+    ADMIN_LOG_CHAT_ID = int(ADMIN_LOG_CHAT_ID)
+except ValueError:
+    raise ValueError("❌ ADMIN_LOG_CHAT_ID must be a valid integer (e.g., -1001234567890)")
+
+if OWNER_USER_ID:
+    try:
+        OWNER_USER_ID = int(OWNER_USER_ID)
+    except ValueError:
+        raise ValueError("❌ OWNER_USER_ID must be a valid integer")
+
+# === LOGGING ===
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
 # === HANDLERS ===
 
 async def log_new_member(update: Update, context):
-    """Triggered when someone joins the main group"""
+    """Triggered when a user joins the main group"""
     if not update.chat_member:
         return
 
@@ -36,7 +54,7 @@ async def log_new_member(update: Update, context):
         user = update.chat_member.new_chat_member.user
         join_time = update.chat_member.date
 
-        # Try to send private verification message
+        # Send private verification message
         try:
             await context.bot.send_message(
                 chat_id=user.id,
@@ -53,7 +71,7 @@ async def log_new_member(update: Update, context):
         except Exception as e:
             logging.warning(f"Could not DM {user.full_name} ({user.id}): {e}")
 
-        # Log join to admin group
+        # Log to admin group
         log_msg = (
             f"🆕 *New Member Joined*\n"
             f"👤 {user.full_name} (`{user.id}`)\n"
@@ -67,7 +85,7 @@ async def log_new_member(update: Update, context):
                 parse_mode=ParseMode.MARKDOWN
             )
         except Exception as e:
-            logging.error(f"Failed to log to admin group: {e}")
+            logging.error(f"Failed to send log to admin group: {e}")
 
         # Save to pending list
         context.bot_data.setdefault("pending", {})[user.id] = {
@@ -96,12 +114,14 @@ async def handle_verify(update: Update, context):
 
     # Mark as verified
     pending = context.bot_data.get("pending", {})
-    if user.id in pending:
-        pending[user.id]["verified"] = True
-        pending[user.id]["room"] = room
-        pending[user.id]["roll"] = roll
+    pending[user.id] = {
+        "name": user.full_name,
+        "room": room,
+        "roll": roll,
+        "verified": True
+    }
 
-    # Notify admin
+    # Notify admin group
     await context.bot.send_message(
         chat_id=ADMIN_LOG_CHAT_ID,
         text=(
@@ -119,7 +139,7 @@ async def handle_verify(update: Update, context):
     )
 
 async def handle_spam(update: Update, context):
-    """Delete obvious spam in the main group"""
+    """Auto-delete obvious spam in the main group"""
     msg = update.effective_message
     if not msg or not msg.text:
         return
@@ -131,20 +151,18 @@ async def handle_spam(update: Update, context):
             await msg.delete()
             await msg.reply_text("❌ Off-topic or spam message removed.", quote=False)
         except Exception as e:
-            logging.warning(f"Failed to delete spam: {e}")
+            logging.warning(f"Failed to delete spam message: {e}")
 
 # === MAIN ===
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Handlers
     app.add_handler(ChatMemberHandler(log_new_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(CommandHandler("verify", handle_verify))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_spam))
 
-    logging.info("Bot starting...")
+    logging.info("🤖 Bot is starting...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-
