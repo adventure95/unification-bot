@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
-    ChatMember pictogram,
+    ChatMemberHandler,
     MessageHandler,
     filters,
     ConversationHandler,
@@ -258,3 +258,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
