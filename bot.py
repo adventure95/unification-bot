@@ -8,7 +8,9 @@ from telegram.ext import (
     CommandHandler,
     ChatMemberHandler,
     MessageHandler,
-    filters
+    filters,
+    ConversationHandler,
+    ContextTypes
 )
 from telegram.constants import ParseMode
 
@@ -17,23 +19,15 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_LOG_CHAT_ID = os.getenv("ADMIN_LOG_CHAT_ID")
 OWNER_USER_ID = os.getenv("OWNER_USER_ID")
 
-# Validate critical environment variables
 if not BOT_TOKEN:
     raise ValueError("❌ Missing BOT_TOKEN in environment variables!")
 if not ADMIN_LOG_CHAT_ID:
     raise ValueError("❌ Missing ADMIN_LOG_CHAT_ID in environment variables!")
 
-# Convert chat IDs to integers
 try:
     ADMIN_LOG_CHAT_ID = int(ADMIN_LOG_CHAT_ID)
 except ValueError:
     raise ValueError("❌ ADMIN_LOG_CHAT_ID must be a valid integer (e.g., -1001234567890)")
-
-if OWNER_USER_ID:
-    try:
-        OWNER_USER_ID = int(OWNER_USER_ID)
-    except ValueError:
-        raise ValueError("❌ OWNER_USER_ID must be a valid integer")
 
 # === LOGGING ===
 logging.basicConfig(
@@ -41,10 +35,13 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+# === CONVERSATION STATES ===
+ROOM, ROLL = range(2)
+
 # === HANDLERS ===
 
-async def log_new_member(update: Update, context):
-    """Triggered when a user joins the main group"""
+async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Triggered when someone joins the main group"""
     if not update.chat_member:
         return
 
@@ -52,31 +49,52 @@ async def log_new_member(update: Update, context):
     new_status = update.chat_member.new_chat_member.status
     if old_status == "left" and new_status == "member":
         user = update.chat_member.new_chat_member.user
+        chat = update.chat_member.chat
         join_time = update.chat_member.date
 
-        # Send private verification message
+        # Try sending private DM
+        dm_status = "✅ DM sent"
         try:
             await context.bot.send_message(
                 chat_id=user.id,
                 text=(
                     "👋 Welcome to *Unification Zone*!\n\n"
-                    "To keep our study group secure and organized, please verify:\n\n"
-                    "👉 Send this command in this chat:\n"
-                    "`/verify <room_number> <roll_number>`\n\n"
-                    "Example: `/verify 4 5`\n\n"
-                    "💡 Your room & roll number are from your class attendance list."
+                    "To verify your class info, please start a chat with me:\n"
+                    "1. Tap this link → @ROTL_Ini420kY\n"
+                    "2. Press **Start**\n"
+                    "3. Follow the steps!"
                 ),
                 parse_mode=ParseMode.MARKDOWN
             )
         except Exception as e:
             logging.warning(f"Could not DM {user.full_name} ({user.id}): {e}")
+            dm_status = "❌ DM failed"
+
+        # Public welcome in group with mention
+        bot_username = "ROTL_Ini420kY"  # 👈 CHANGE THIS TO YOUR BOT'S USERNAME
+        welcome_text = (
+            f"👋 Welcome, {user.mention_html()}!\n\n"
+            f"Please verify your class info:\n"
+            f"1️⃣ Tap → @{bot_username}\n"
+            f"2️⃣ Press **Start**\n"
+            f"3️⃣ Follow the steps!"
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat.id,
+                text=welcome_text,
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as e:
+            logging.error(f"Failed to send public welcome: {e}")
 
         # Log to admin group
+        username = f"@{user.username}" if user.username else user.full_name
         log_msg = (
             f"🆕 *New Member Joined*\n"
-            f"👤 {user.full_name} (`{user.id}`)\n"
-            f"🕒 {join_time.strftime('%Y-%m-%d %H:%M')}\n"
-            f"📩 *Sent verification request*"
+            f"👤 {username} (`{user.id}`)\n"
+            f"📅 Joined: {join_time.strftime('%Y-%m-%d at %H:%M')}\n"
+            f"📩 {dm_status}"
         )
         try:
             await context.bot.send_message(
@@ -85,81 +103,96 @@ async def log_new_member(update: Update, context):
                 parse_mode=ParseMode.MARKDOWN
             )
         except Exception as e:
-            logging.error(f"Failed to send log to admin group: {e}")
+            logging.error(f"Failed to log to admin group: {e}")
 
-        # Save to pending list
+        # Save to pending
         context.bot_data.setdefault("pending", {})[user.id] = {
             "name": user.full_name,
             "join_time": join_time,
             "verified": False
         }
 
-async def handle_verify(update: Update, context):
-    """Handle /verify command in private chat"""
+# === CONVERSATION: START → ROOM → ROLL ===
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    args = context.args
+    await update.message.reply_text(
+        f"👋 Hello, {user.first_name}! Welcome to *Unification Zone*.\n\n"
+        "Let’s verify your class info step by step.\n\n"
+        "➡️ What’s your *room number*? (e.g., 4)"
+    )
+    return ROOM
 
-    if len(args) != 2:
-        await update.message.reply_text(
-            "UsageId: `/verify <room> <roll>`\nExample: `/verify 4 5`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
+async def get_room(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    room = update.message.text.strip()
+    if not room.isdigit():
+        await update.message.reply_text("❌ Please enter a *number* (e.g., 4).")
+        return ROOM
+    context.user_data["room"] = room
+    await update.message.reply_text(
+        f"✅ Room {room} recorded!\n\n"
+        "➡️ Now, what’s your *roll number* from your attendance list? (e.g., 5)"
+    )
+    return ROLL
 
-    room, roll = args[0], args[1]
+async def get_roll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    roll = update.message.text.strip()
+    if not roll.isdigit():
+        await update.message.reply_text("❌ Please enter a *number* (e.g., 5).")
+        return ROLL
 
-    if not (room.isdigit() and roll.isdigit()):
-        await update.message.reply_text("❌ Room and roll must be numbers (e.g., 4 and 5).")
-        return
+    room = context.user_data["room"]
+    user = update.effective_user
 
     # Mark as verified
-    pending = context.bot_data.get("pending", {})
-    pending[user.id] = {
+    context.bot_data.setdefault("pending", {})[user.id] = {
         "name": user.full_name,
         "room": room,
         "roll": roll,
-        "verified": True
+        "verified": True,
+        "join_time": context.bot_data.get("pending", {}).get(user.id, {}).get("join_time", datetime.now())
     }
 
     # Notify admin group
+    username = f"@{user.username}" if user.username else user.full_name
     await context.bot.send_message(
         chat_id=ADMIN_LOG_CHAT_ID,
         text=(
             f"✅ *Verification Complete*\n"
-            f"👤 {user.full_name} (`{user.id}`)\n"
-            f"🏠 Room: {room} • 📋 Roll: #{roll}\n\n"
+            f"👤 {username} (`{user.id}`)\n"
+            f"🏠 Room: {room} • 📋 Roll: #{roll}\n"
+            f"📅 Joined: {context.bot_data['pending'][user.id]['join_time'].strftime('%Y-%m-%d at %H:%M')}\n\n"
             f"🔔 *Action:* Promote as restricted admin with title `Room {room} • #{roll}`"
         ),
         parse_mode=ParseMode.MARKDOWN
     )
 
     await update.message.reply_text(
-        f"✅ Verified! Welcome to Unification Zone, {user.first_name}!\n\n"
-        f"An admin will assign your role shortly."
+        f"✅ Verified! You’re **Room {room} • #{roll}**.\n\n"
+        "An admin will assign your role shortly. Thank you for helping keep our group organized! 🙌"
     )
+    return ConversationHandler.END
 
-async def handle_spam(update: Update, context):
-    """Auto-delete obvious spam in the main group"""
-    msg = update.effective_message
-    if not msg or not msg.text:
-        return
-
-    text = msg.text.lower()
-    spam_triggers = ["http", "t.me/", "join", "free", "gift", "click", "subscribe", ".com", "https"]
-    if any(trigger in text for trigger in spam_triggers):
-        try:
-            await msg.delete()
-            await msg.reply_text("❌ Off-topic or spam message removed.", quote=False)
-        except Exception as e:
-            logging.warning(f"Failed to delete spam message: {e}")
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Verification cancelled. Send /start to try again.")
+    return ConversationHandler.END
 
 # === MAIN ===
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Conversation handler
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            ROOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_room)],
+            ROLL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roll)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+
+    app.add_handler(conv_handler)
     app.add_handler(ChatMemberHandler(log_new_member, ChatMemberHandler.CHAT_MEMBER))
-    app.add_handler(CommandHandler("verify", handle_verify))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_spam))
 
     logging.info("🤖 Bot is starting...")
     app.run_polling()
