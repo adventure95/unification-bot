@@ -1,5 +1,5 @@
 # bot.py
-# Final version with spam filter, report command, and promotion logging — 2025-12-05
+# Final version for "The Learning Circle" — 2025-12-05
 
 import os
 import logging
@@ -33,7 +33,7 @@ except ValueError:
 
 # === ROLES ===
 OWNER_ID = int(OWNER_USER_ID) if OWNER_USER_ID else None
-ADMIN_IDS = set()  # Add future admin IDs here if needed
+ADMIN_IDS = set()
 
 def is_owner(user_id: int) -> bool:
     return OWNER_ID is not None and user_id == OWNER_ID
@@ -71,7 +71,21 @@ async def handle_spam(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.warning(f"Failed to delete spam: {e}")
 
-# === NEW: REPORT COMMAND ===
+# === HELP COMMAND ===
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "ℹ️ *The Learning Circle — Bot Help*\n\n"
+        "🔹 *New here?*\n"
+        "→ Press /start to verify your room & roll number\n\n"
+        "🔹 *Need help?*\n"
+        "→ Use /report <issue> to alert admins\n\n"
+        "🔹 *Admins only*\n"
+        "→ /status — check bot health\n"
+        "→ /list_pending — see unverified members"
+    )
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN, quote=False)
+
+# === REPORT COMMAND ===
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
@@ -86,7 +100,7 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     alert = (
         f"🚨 *New Report*\n"
         f"👤 {user.full_name} (`{user.id}`)\n"
-        f"🏘️ Group: {update.effective_chat.title if update.effective_chat.title else 'Unknown'}\n"
+        f"🏘️ Group: {update.effective_chat.title if update.effective_chat.title else 'The Learning Circle'}\n"
         f"📝 {report_text}"
     )
     try:
@@ -100,7 +114,7 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Failed to send report: {e}")
         await update.message.reply_text("❌ Failed to send report. Please try again.", quote=False)
 
-# === NEW: PROMOTION LOGGING ===
+# === PROMOTION LOGGING ===
 async def promoted(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
         return
@@ -128,8 +142,7 @@ async def promoted(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"Failed to log promotion: {e}")
 
-# === HANDLERS ===
-
+# === JOIN HANDLER ===
 async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.chat_member:
         return
@@ -146,7 +159,7 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=user.id,
                 text=(
-                    "👋 Welcome!\n\n"
+                    "👋 Welcome to *The Learning Circle*!\n\n"
                     "To verify your class info, please start a chat with me:\n"
                     "1. Tap this link → @ROTL_Ini420kY\n"
                     "2. Press **Start**\n"
@@ -160,7 +173,7 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         welcome_text = (
             f"👋 Welcome, {user.mention_html()}!\n\n"
-            "Please verify your class info:\n"
+            "Please verify your class info for *The Learning Circle*:\n"
             "1️⃣ Tap → @ROTL_Ini420kY\n"
             "2️⃣ Press **Start**\n"
             "3️⃣ Follow the steps!"
@@ -196,12 +209,13 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "verified": False
         }
 
-# === CONVERSATION: VERIFY FLOW ===
+# === VERIFICATION FLOW ===
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_text(
         f"👋 Hello, {user.first_name}!\n\n"
+        "Welcome to *The Learning Circle*.\n"
         "Let’s verify your class info step by step.\n\n"
         "➡️ What’s your *room number*? (e.g., 4)"
     )
@@ -251,7 +265,7 @@ async def get_roll(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ Verified! You’re **Room {room} • #{roll}**.\n\n"
-        "An admin will assign your role shortly. Thank you for helping keep our group organized! 🙌"
+        "An admin will assign your role shortly. Thank you for helping keep *The Learning Circle* organized! 🙌"
     )
     return ConversationHandler.END
 
@@ -259,7 +273,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Verification cancelled. Send /start to try again.")
     return ConversationHandler.END
 
-# === ROLE-BASED COMMANDS ===
+# === ADMIN COMMANDS ===
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -276,7 +290,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔐 *Owner Status*\n"
         f"🟢 Bot: Active\n"
         f"👥 Pending verifications: {pending_count}\n"
-        f"🏘️ Group: {chat.title if chat.title else 'Unknown'}"
+        f"🏘️ Group: {chat.title if chat.title else 'The Learning Circle'}"
     )
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN, quote=False)
 
@@ -317,6 +331,7 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(ChatMemberHandler(log_new_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_spam))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("report", report))
     app.add_handler(CommandHandler("promoted", promoted))
     app.add_handler(CommandHandler("status", status))
