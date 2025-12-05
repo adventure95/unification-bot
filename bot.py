@@ -1,5 +1,5 @@
 # bot.py
-# Updated: guided verification flow + neutral welcome — 2025-12-05
+# Final version: guided verification + role-based commands — 2025-12-05
 
 import os
 import logging
@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
-    ChatMemberHandler,
+    ChatMember pictogram,
     MessageHandler,
     filters,
     ConversationHandler,
@@ -30,6 +30,17 @@ try:
     ADMIN_LOG_CHAT_ID = int(ADMIN_LOG_CHAT_ID)
 except ValueError:
     raise ValueError("❌ ADMIN_LOG_CHAT_ID must be a valid integer (e.g., -1001234567890)")
+
+# === ROLES ===
+OWNER_ID = int(OWNER_USER_ID) if OWNER_USER_ID else None
+# Add trusted admin IDs here later: {123456789, 987654321}
+ADMIN_IDS = set()
+
+def is_owner(user_id: int) -> bool:
+    return OWNER_ID is not None and user_id == OWNER_ID
+
+def is_admin(user_id: int) -> bool:
+    return is_owner(user_id) or user_id in ADMIN_IDS
 
 # === LOGGING ===
 logging.basicConfig(
@@ -178,6 +189,51 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Verification cancelled. Send /start to try again.")
     return ConversationHandler.END
 
+# === ROLE-BASED COMMANDS ===
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_owner(user.id):
+        await update.message.reply_text(
+            "ℹ️ This command is restricted to the owner.",
+            quote=False
+        )
+        return
+
+    pending_count = len([
+        u for u in context.bot_data.get("pending", {}).values() 
+        if not u.get("verified")
+    ])
+    chat = update.effective_chat
+    message = (
+        "🔐 *Owner Status*\n"
+        f"🟢 Bot: Active\n"
+        f"👥 Pending verifications: {pending_count}\n"
+        f"🏘️ Group: {chat.title if chat.title else 'Unknown'}"
+    )
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN, quote=False)
+
+async def list_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("🔒 Admin-only command.", quote=False)
+        return
+
+    pending = context.bot_data.get("pending", {})
+    unverified = [
+        f"• {data['name']} (joined {data['join_time'].strftime('%m-%d')})" 
+        for uid, data in pending.items() if not data.get("verified")
+    ]
+    
+    if not unverified:
+        await update.message.reply_text("✅ All members verified!", quote=False)
+    else:
+        await update.message.reply_text(
+            "📋 *Unverified Members*\n" + "\n".join(unverified),
+            parse_mode=ParseMode.MARKDOWN,
+            quote=False
+        )
+
 # === MAIN ===
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -194,6 +250,8 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(ChatMemberHandler(log_new_member, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("list_pending", list_pending))
 
     logging.info("🤖 Bot is starting...")
     app.run_polling()
