@@ -1,5 +1,5 @@
 # bot.py
-# Final version: guided verification + role-based commands — 2025-12-05
+# Final stable version — 2025-12-05
 
 import os
 import logging
@@ -33,8 +33,7 @@ except ValueError:
 
 # === ROLES ===
 OWNER_ID = int(OWNER_USER_ID) if OWNER_USER_ID else None
-# Add trusted admin IDs here later: {123456789, 987654321}
-ADMIN_IDS = set()
+ADMIN_IDS = set()  # Add more later: {123456789}
 
 def is_owner(user_id: int) -> bool:
     return OWNER_ID is not None and user_id == OWNER_ID
@@ -54,7 +53,6 @@ ROOM, ROLL = range(2)
 # === HANDLERS ===
 
 async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Triggered when someone joins the main group"""
     if not update.chat_member:
         return
 
@@ -65,7 +63,6 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat = update.chat_member.chat
         join_time = update.chat_member.date
 
-        # Try sending private DM
         dm_status = "✅ DM sent"
         try:
             await context.bot.send_message(
@@ -83,7 +80,6 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.warning(f"Could not DM {user.full_name} ({user.id}): {e}")
             dm_status = "❌ DM failed"
 
-        # Public welcome in group with mention
         welcome_text = (
             f"👋 Welcome, {user.mention_html()}!\n\n"
             "Please verify your class info:\n"
@@ -100,7 +96,6 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"Failed to send public welcome: {e}")
 
-        # Log to admin group
         username = f"@{user.username}" if user.username else user.full_name
         log_msg = (
             f"🆕 *New Member Joined*\n"
@@ -117,14 +112,13 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"Failed to log to admin group: {e}")
 
-        # Save to pending
         context.bot_data.setdefault("pending", {})[user.id] = {
             "name": user.full_name,
             "join_time": join_time,
             "verified": False
         }
 
-# === CONVERSATION: START → ROOM → ROLL ===
+# === CONVERSATION: VERIFY FLOW ===
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -156,7 +150,6 @@ async def get_roll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room = context.user_data["room"]
     user = update.effective_user
 
-    # Mark as verified
     context.bot_data.setdefault("pending", {})[user.id] = {
         "name": user.full_name,
         "room": room,
@@ -165,7 +158,6 @@ async def get_roll(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "join_time": context.bot_data.get("pending", {}).get(user.id, {}).get("join_time", datetime.now())
     }
 
-    # Notify admin group
     username = f"@{user.username}" if user.username else user.full_name
     await context.bot.send_message(
         chat_id=ADMIN_LOG_CHAT_ID,
@@ -194,10 +186,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_owner(user.id):
-        await update.message.reply_text(
-            "ℹ️ This command is restricted to the owner.",
-            quote=False
-        )
+        await update.message.reply_text("ℹ️ This command is restricted to the owner.", quote=False)
         return
 
     pending_count = len([
@@ -238,7 +227,6 @@ async def list_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -258,4 +246,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
