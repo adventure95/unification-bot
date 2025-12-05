@@ -1,5 +1,5 @@
 # bot.py
-# Final stable version — 2025-12-05
+# Final version with spam filter, report command, and promotion logging — 2025-12-05
 
 import os
 import logging
@@ -33,7 +33,7 @@ except ValueError:
 
 # === ROLES ===
 OWNER_ID = int(OWNER_USER_ID) if OWNER_USER_ID else None
-ADMIN_IDS = set()  # Add more later: {123456789}
+ADMIN_IDS = set()  # Add future admin IDs here if needed
 
 def is_owner(user_id: int) -> bool:
     return OWNER_ID is not None and user_id == OWNER_ID
@@ -49,6 +49,84 @@ logging.basicConfig(
 
 # === CONVERSATION STATES ===
 ROOM, ROLL = range(2)
+
+# === SPAM FILTER ===
+SPAM_TRIGGERS = [
+    "https://", "http://", "t.me/", ".com", ".net", ".org",
+    "join", "free", "gift", "click", "subscribe",
+    "add me", "pm me", "check this", "look at this",
+    "follow me", "my channel", "t.me"
+]
+
+async def handle_spam(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    if not msg or not msg.text:
+        return
+
+    text = msg.text.lower()
+    if any(trigger in text for trigger in SPAM_TRIGGERS):
+        try:
+            await msg.delete()
+            await msg.reply_text("❌ Off-topic or spam message removed.", quote=False)
+        except Exception as e:
+            logging.warning(f"Failed to delete spam: {e}")
+
+# === NEW: REPORT COMMAND ===
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "UsageId: `/report <your message>`\nExample: `/report User is posting ads`",
+            parse_mode=ParseMode.MARKDOWN,
+            quote=False
+        )
+        return
+
+    user = update.effective_user
+    report_text = " ".join(context.args)
+    alert = (
+        f"🚨 *New Report*\n"
+        f"👤 {user.full_name} (`{user.id}`)\n"
+        f"🏘️ Group: {update.effective_chat.title if update.effective_chat.title else 'Unknown'}\n"
+        f"📝 {report_text}"
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_LOG_CHAT_ID,
+            text=alert,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        await update.message.reply_text("✅ Report sent to admins. Thank you!", quote=False)
+    except Exception as e:
+        logging.error(f"Failed to send report: {e}")
+        await update.message.reply_text("❌ Failed to send report. Please try again.", quote=False)
+
+# === NEW: PROMOTION LOGGING ===
+async def promoted(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "UsageId: `/promoted @username Room X • #Y`\nExample: `/promoted @feva95 Room 4 • #5`",
+            parse_mode=ParseMode.MARKDOWN,
+            quote=False
+        )
+        return
+
+    promotion_info = " ".join(context.args)
+    log_msg = (
+        f"👑 *Admin Promoted*\n"
+        f"👤 {promotion_info}"
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_LOG_CHAT_ID,
+            text=log_msg,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        await update.message.reply_text("✅ Promotion logged.", quote=False)
+    except Exception as e:
+        logging.error(f"Failed to log promotion: {e}")
 
 # === HANDLERS ===
 
@@ -238,6 +316,9 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(ChatMemberHandler(log_new_member, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_spam))
+    app.add_handler(CommandHandler("report", report))
+    app.add_handler(CommandHandler("promoted", promoted))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("list_pending", list_pending))
 
