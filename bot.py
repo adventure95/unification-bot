@@ -1,4 +1,6 @@
 # bot.py
+# Updated: guided verification flow + neutral welcome — 2025-12-05
+
 import os
 import logging
 from datetime import datetime
@@ -58,7 +60,7 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=user.id,
                 text=(
-                    "👋 Welcome to *Unification Zone*!\n\n"
+                    "👋 Welcome!\n\n"
                     "To verify your class info, please start a chat with me:\n"
                     "1. Tap this link → @ROTL_Ini420kY\n"
                     "2. Press **Start**\n"
@@ -71,13 +73,12 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dm_status = "❌ DM failed"
 
         # Public welcome in group with mention
-        bot_username = "ROTL_Ini420kY"  # 👈 CHANGE THIS TO YOUR BOT'S USERNAME
         welcome_text = (
             f"👋 Welcome, {user.mention_html()}!\n\n"
-            f"Please verify your class info:\n"
-            f"1️⃣ Tap → @{bot_username}\n"
-            f"2️⃣ Press **Start**\n"
-            f"3️⃣ Follow the steps!"
+            "Please verify your class info:\n"
+            "1️⃣ Tap → @ROTL_Ini420kY\n"
+            "2️⃣ Press **Start**\n"
+            "3️⃣ Follow the steps!"
         )
         try:
             await context.bot.send_message(
@@ -117,7 +118,7 @@ async def log_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_text(
-        f"👋 Hello, {user.first_name}! Welcome to *Unification Zone*.\n\n"
+        f"👋 Hello, {user.first_name}!\n\n"
         "Let’s verify your class info step by step.\n\n"
         "➡️ What’s your *room number*? (e.g., 4)"
     )
